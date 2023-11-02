@@ -16,39 +16,39 @@
 #true marg RR = 0.25; true cond RR = 0.23;
 
 
-datagen<-function(seed=sample(1:1000000,size=1),ssize=500,popsize=1500000,OR_C=3.5,OR_WI=1,OR_WC=5,OR_H=1.5,em=5){
+datagen<-function(seed=sample(1:1000000,size=1),ssize=1500,popsize=1500000,OR_C=3.5,OR_WI=1,OR_WC=5,OR_H=1.5,em1=5, em2=0){
   set.seed(seed)
   #generate data
   C<-runif(n=popsize, -2,2)
   U1<-rbinom(n=popsize,size=1,prob=0.5) #affects both
   U2<-rbinom(n=popsize,size=1,prob=0.5) #affects covid
 
-    V=rep(0,popsize)
-    Infec.0<-rbinom(prob=plogis(0.5*C-5+0.5*U1),size=1,n=popsize) #current prevalence around 0.007
+  V=rep(0,popsize)
+  Infec.0<-rbinom(prob=plogis(0.5*C-5+0.5*U1),size=1,n=popsize) #current prevalence around 0.007
 
-    #Infected with COVID
-    Infec_COVID.0<- rbinom(prob=plogis( 1-log(OR_C)*V -6 + C+em*V*C+log(3)*U2*(1.5-V)-2*U1), size=1,n=popsize) #0.009
+  #Infected with COVID
+  Infec_COVID.0<- rbinom(prob=plogis( 1-log(OR_C)*V -6 + C+em1*V*C+ em2*V*sin(C) + log(3)*U2*(1.5-V)-2*U1), size=1,n=popsize) #0.009
 
-    #symptoms based on infection
-    #can come from either or both infections, if present
-    W.0=rep(0,popsize)
-    W.0[Infec.0==1]<-rbinom(prob=plogis(-4+0.5*C[Infec.0==1]-log(OR_WI)*V[Infec.0==1]-0.5*U1[Infec.0==1]),size=1, n=sum(Infec.0==1))
-    W.0[Infec_COVID.0==1]<-rbinom(prob=plogis(-2+1*C[Infec_COVID.0==1]-log(OR_WC)*V[Infec_COVID.0==1]-1*U1[Infec_COVID.0==1]+0.5*U2[Infec_COVID.0==1]*(1-V[Infec_COVID.0==1])),size=1, n=sum(Infec_COVID.0))
-    #mean(W[Infec==1|Infec_COVID==1]) #9%
-    #mean(W[Infec_COVID==1]) #27%
-    #mean(W[Infec==1]) #2%
-    #mean(W[Infec_COVID==1&V==1]) #8%
+  #symptoms based on infection
+  #can come from either or both infections, if present
+  W.0=rep(0,popsize)
+  W.0[Infec.0==1]<-rbinom(prob=plogis(-4+0.5*C[Infec.0==1]-log(OR_WI)*V[Infec.0==1]-0.5*U1[Infec.0==1]),size=1, n=sum(Infec.0==1))
+  W.0[Infec_COVID.0==1]<-rbinom(prob=plogis(-2+1*C[Infec_COVID.0==1]-log(OR_WC)*V[Infec_COVID.0==1]-1*U1[Infec_COVID.0==1]+0.5*U2[Infec_COVID.0==1]*(1-V[Infec_COVID.0==1])),size=1, n=sum(Infec_COVID.0))
+  #mean(W[Infec==1|Infec_COVID==1]) #9%
+  #mean(W[Infec_COVID==1]) #27%
+  #mean(W[Infec==1]) #2%
+  #mean(W[Infec_COVID==1&V==1]) #8%
 
-    #hospitalization, only possible if symptoms present
-    H.0=rep(0,popsize)
-    H.0[W.0==1]<-rbinom(prob=plogis(1.5+0.5*C[W.0==1]+log(OR_H)*V[W.0==1]-0.5*U1[W.0==1]),size=1,n=sum(W.0==1))
+  #hospitalization, only possible if symptoms present
+  H.0=rep(0,popsize)
+  H.0[W.0==1]<-rbinom(prob=plogis(1.5+0.5*C[W.0==1]+log(OR_H)*V[W.0==1]-0.5*U1[W.0==1]),size=1,n=sum(W.0==1))
 
-    V=rep(1,popsize)
+  V=rep(1,popsize)
   #Infection (with something) has some common risk factors U1 and C
   Infec<-rbinom(prob=plogis(0.5*C-5+0.5*U1),size=1,n=popsize) #current prevalence around 0.007
 
   #Infected with COVID
-  Infec_COVID<- rbinom(prob=plogis( 1-log(OR_C)*V -6 + C+em*V*C+log(3)*U2*(1.5-V)-2*U1), size=1,n=popsize) #0.009
+  Infec_COVID<- rbinom(prob=plogis( 1-log(OR_C)*V  -6 + C+em1*V*C+ em2*V*sin(C) +log(3)*U2*(1.5-V)-2*U1), size=1,n=popsize) #0.009
 
   #symptoms based on infection
   #can come from either or both infections, if present
@@ -76,7 +76,7 @@ datagen<-function(seed=sample(1:1000000,size=1),ssize=500,popsize=1500000,OR_C=3
   Infec<-rbinom(prob=plogis(0.5*C-5+0.5*U1),size=1,n=popsize) #current prevalence around 0.007
 
   #Infected with COVID
-  Infec_COVID<- rbinom(prob=plogis( 1-log(OR_C)*V -6 + C+em*V*C+log(3)*U2*(1.5-V)-2*U1), size=1,n=popsize) #0.009
+  Infec_COVID<- rbinom(prob=plogis( 1-log(OR_C)*V -6 + C+em1*V*C+ em2*V*sin(C)+log(3)*U2*(1.5-V)-2*U1), size=1,n=popsize) #0.009
 
   #symptoms based on infection
   #can come from either or both infections, if present
@@ -109,56 +109,63 @@ sum(pseudodat$pseudo == 1)
 sum(pseudodat$pseudo == -1)
 
 # What is the truth CATE?
+plot(pseudodat$C, -log(3.5) + 5*pseudodat$C, col = "red")
+# glm regression. (OR)
+mod.1 <- glm(Y.1 ~ C, family = binomial, data = pseudodat)
+mod.0 <- glm(Y.0 ~ C, family = binomial, data = pseudodat)
+tao.glm <- predict(mod.1, type = "link") - predict(mod.0, type = "link")
+lines(pseudodat$C, tao.glm, col = "blue")
+
+
+# glm 2 regression. (RR)
+tao.glm2 <- log(predict(mod.1, type = "response")) - log(predict(mod.0, type = "response"))
+lines(pseudodat$C, tao.glm2, col = "orange")
+
+library(gam)
+gam_1 <- gam(Y.1 ~ s(C), family = binomial, data = pseudodat)
+gam_0 <- gam(Y.0 ~ s(C), family = binomial, data = pseudodat)
+tao.gam <- predict(gam_1, type = "link") - predict(gam_0, type = "link")
+lines(pseudodat$C, tao.gam, col = "purple")
+
+
 # Oracle estimator of CATE.
 smoothed <- smooth.spline(pseudodat$C, pseudodat$pseudo)
 predict(smoothed)$y
 # Plot the original data and the smoothed spline
-plot(pseudodat$C, pseudodat$pseudo, main = "Smoothing Spline Example", xlab = "X", ylab = "Y")
-lines(smoothed, col = "red")
+# plot(pseudodat$C, pseudodat$pseudo, main = "Smoothing Spline Example", xlab = "X", ylab = "Y")
+lines(smoothed, col = "black")
 
 # regression
 glmpseudo <- glm(pseudodat$pseudo ~ pseudodat$C, family = "gaussian")
 yglm <- predict(glmpseudo,type="response")
-plot(dat$dat.ct$C, yglm, col = "green")
-lines(smoothed, col = "red")
-
-# glm regression.
-mod.1 <- glm(Y.1 ~ C, family = binomial, data = pseudodat)
-mod.0 <- glm(Y.0 ~ C, family = binomial, data = pseudodat)
-tao.glm <- predict(mod.1, type = "link") - predict(mod.0, type = "link")
-plot(pseudodat$C, tao.glm)
-
-library(gam)
-gam_1 <- gam(Y.1 ~ C, family = binomial, data = pseudodat)
-gam_0 <- gam(Y.0 ~ C, family = binomial, data = pseudodat)
-tao.gam <- predict(gam_1, type = "link") - predict(gam_0, type = "link")
-plot(pseudodat$C, tao.gam)
+lines(pseudodat$C, yglm, col = "green")
 
 
-plot(dat$dat.ct$C, yglm, col = "green")
-lines(smoothed, col = "red")
-lines(tao.bin, "blue")
+plot(smoothed, col = "black")
+lines(pseudodat$C, yglm, col = "green")
+
+
+
 
 
 # TND dr-learner
 TNDdat <- dat$dat.ob
 TNDdf_train <-TNDdat
-library(hal9001);library(dplyr)
-res <- element(TNDdat)
+library(hal9001);library(dplyr); library(earth)
+res <- element.earth(TNDdat)
 TNDDRlearner <- function(TNDdat, res){
   A.1 <- ((1 - TNDdat$Y)*(TNDdat$V - res$g1))/(res$g1* (1 -res$mu1))
   A.0 <- ((1 - TNDdat$Y)*((1-TNDdat$V) - res$g0))/(res$g0* (1 - res$mu0))
   psi.1 <- TNDdat$Y*TNDdat$V/res$g1 - res$mu1*A.1
   summary((1 - res$mu0))
   psi.0 <- TNDdat$Y*(1-TNDdat$V)/res$g0 - res$mu0*A.0
-  pseudo.dr <- psi.1-psi.0
+  pseudo.dr <- psi.1 - psi.0
   summary(pseudo.dr)
   smoothed <- smooth.spline(TNDdat$C, pseudo.dr)
-  return(list(est = pseudo.dr, result = smoothed, Pred = predict(smoothed)$y))
+  glm <- lm(pseudo.dr ~ TNDdat$C)
+  return(list(est = pseudo.dr, res1 = smoothed, res2 = glm,Pred = predict(smoothed)$y))
 }
+
 reshat <- TNDDRlearner(TNDdat, res)
-
-
-plot(pseudodat$C, pseudodat$pseudo, main = "Smoothing Spline Example", xlab = "X", ylab = "Y")
-lines(smoothed, col = "red")
-plot(reshat$result, col = "blue")
+lines(reshat$res1,  type="l", lty=2, col = "blue")
+lines(reshat$res2,  type="l", lty=3, col = "blue")
