@@ -1,87 +1,111 @@
-#' TND Partial Interference DATA generation
-#' 
+#' Propensity score function to get phi_hat
 #'
-library(truncnorm)
-datagen_int<-function(rangeN = 400:500, nblocks=1000, OR_C=3,OR_WI=1,OR_WC=5,OR_H=1.5,em=0){
-  data.list <- list()
-  
-  N = sample(x = rangeN, size = nblocks, replace = T)
-  vaxpos <- rtruncnorm(nblocks, -1, 1, mean = 0, sd = 1)
-  for(i in 1:nblocks){
-    # Step1. Data generation
-    #generate data (WITH clustering for U2)
-    C<-runif(n=N[i], 1, 2)
-    U1<-rbinom(n=N[i],size=1,prob=0.5) #affects both
-    U2<-rbinom(n=N[i],size=1,prob=plogis(0.4+0.2*vaxpos[i])) #affects covid #shifted upwards for vaxpos blocks #it's like reckless behaviour specific to COVID
-    # Step2. Treatment model
-    p_trt <- plogis(-0.25 + 0.3*C+0.5*vaxpos[i])
-    V<-rbinom(prob= p_trt,size=1,n=N[i])
-    g.V = (sum(V)-V)/(N[i]-1)
-    # Step3. Outcome model
-    #infection
-    #Infection (with something) has some common risk factors U1 and C
-    Infec<-rbinom(prob=plogis(0.2+0.5*C-5+0.5*U1),size=1,n=N[i]) #current prevalence around 0.007
-    #Infected with COVID #vaccine more effective with high vaccination rates
-    Infprob=plogis(-3.5 + C -0.5*V -0.2* g.V - 1.2*log(OR_C)*V*(g.V) +em*V*C +log(2)*U2-2*U1)
-    #range(Infprob)
-    # which(is.na(Infprob))
-    Infec_COVID<-rbinom(prob = Infprob, size=1,n=N[i]) #0.018
-    #symptoms based on infection
-    W=W1=W2=rep(0,N[i])
-    W1[Infec==1]<-rbinom(prob=plogis(-2+0.5*C[Infec==1]-log(OR_WI)*V[Infec==1]-0.5*U1[Infec==1]),size=1, n=sum(Infec==1))
-    W2[Infec_COVID==1]<-rbinom(prob=plogis(-1.5+1*C[Infec_COVID==1]-log(OR_WC)*V[Infec_COVID==1]-1*U1[Infec_COVID==1]+0.5*U2[Infec_COVID==1]*(1-V[Infec_COVID==1])),size=1, n=sum(Infec_COVID))
-    W=(W1|W2)+0
-    #hospitalization
-    H=rep(0,N[i])
-    Hprob<-plogis(0.5*C[W==1]-log(OR_H)*V[W==1]-0.5*U1[W==1]+g.V[W==1])
-    H[W==1]<-rbinom(prob=Hprob,size=1,n=sum(W==1))
-    #selection on outcome for testing (does not condition on infectious status, just being in the hospital)
-    R <- as.vector(na.omit(sample((1:N[i])[H == 1], min(rangeN[1], sum(H == 1)))))
-    data.list[[i]] <- as.data.frame(cbind(Y=Infec_COVID,V=V,C=C,block=i,f_m=g.V, N=N[i]))[R,]
+#' @param datTND TND Data frame including treatment, outcome, and covariates.
+#' @param glm_form PS model formula 
+#' @param method Character, either 'ORG_IPW' or 'TND_IPW'. If 'ORG_IPW' is specified, then the
+#' PS is estimated by using the whole TND data (i.e., original partial interference methods). If the method
+#' is set equal to 'TND_IPW', use the proposed TND IPW estimator for PS, using only controls. 
+#' 
+#' @return phi_hat A list with two elements. The first one is a vector of
+#' coefficients of the PS, and the second one is the random effect variance.
+#' If the second element is 0, the propensity score excludes random effects.
+#'
+#' @export
+
+PS_model <- function(datTND, glm_form, method = c('ORG_IPW', 'TND_IPW')){
+  if (method == 'TND_IPW') {
+    glmer_fit_col <- lme4::glmer(
+      data = datTND[datTND$Y==0, ],
+      formula = as.formula(glm_form),
+      family = stats::binomial,
+      nAGQ = 2
+    )
+    phi_hat <- list(coefs = summary(glmer_fit_col)$coef[, 1],
+                    re_var = as.numeric(summary(glmer_fit_col)$varcor))
   }
-  return(dplyr::bind_rows(data.list))
+  
+  if (method == 'ORG_IPW') {
+    glmer_fit <- lme4::glmer(
+      data = datTND,
+      formula = as.formula(glm_form),
+      family = stats::binomial,
+      nAGQ = 2
+    )
+    phi_hat <- list(coefs = summary(glmer_fit)$coef[, 1],
+                    re_var = as.numeric(summary(glmer_fit)$varcor))
+  }
+  return(phi_hat)
 }
 
-(datTND<-datagen_int(nblocks=1000))
 
-
-
-#' Estimating the group average potential outcome
-#' 
-#' IPW estimator of the group average potential outcome.
+#' Propensity score function to get phi_hat
 #'
-#' @param dta Data frame including treatment, outcome and covariates.
-#' @param cov_cols The indices including the covariates of the ps model.
-#' @param phi_hat A list with two elements. The first one is a vector of
-#' coefficients of the ps, and the second one is the random effect variance.
-#' If the second element is 0, the propensity score excludes random effects.
-#' @param gamma_numer The coefficients of the ps model in the numerator.
-#' If left NULL and estimand is 1, the coefficients in phi_hat will be used
-#' instead.
-#' @param alpha The values of alpha for which we want to estimate the group
-#' average potential outcome.
-#' @param neigh_ind List. i^{th} element is a vector with the row indices of
-#' dta that are in cluster i. Can be left NULL.
-#' @param trt_col If the treatment is not named 'V' in dta, specify the
-#' treatment column index.
-#' @param out_col If the outcome is not named 'Y', specify the outcome column
-#' index.
+#' @param datTND TND Data frame including treatment, outcome, and covariates.
+#' @param gamma_form PS model formula 
+#' @param method Character, either 'ORG_IPW' or 'TND_IPW'. If 'ORG_IPW' is specified, then the
+#' PS is estimated by using the whole TND data (i.e., original partial interference methods). If the method
+#' is set equal to 'TND_IPW', use the proposed TND IPW estimator for PS, using only controls. 
+#' 
+#' @return gamma_numer The coefficients of the ps model in the numerator.
+#'
+#' @export
+Policy_coef <- function(datTND, gamma_form, method = c('ORG_IPW', 'TND_IPW')){
+  if (method == 'TND_IPW') {
+    gamma_glmod <- lme4::glmer(as.formula(gamma_form), data = datTND[datTND$Y==0, ], family = 'binomial',
+                               control = glmerControl(optimizer = "bobyqa",
+                                                      optCtrl = list(maxfun = 2e5)))
+    gamma_numer <- summary(gamma_glmod)$coef[, 1]
+    rm(list = c('gamma_form', 'gamma_glmod'))
+  }
+  
+  if (method == 'ORG_IPW') {
+    gamma_glmod <- lme4::glmer(as.formula(gamma_form), data = datTND, family = 'binomial',
+                               control = glmerControl(optimizer = "bobyqa",
+                                                      optCtrl = list(maxfun = 2e5)))
+    gamma_numer <- summary(gamma_glmod)$coef[, 1]
+    rm(list = c('gamma_form', 'gamma_glmod'))
+  }
+  return(gamma_numer)
+}
+
+
+###########################################
+### GroupIPW needs
+### (1)FromAlphaToRE and AlphaToBi
+### (2)CalcNumerator
+### (3)Denominator
+###########################################
+#' Function that calculates the random effect that corresponds to a specific
+#' average probability of treatment.
+#'
+#' @param alpha Target average probability of treatment. Numberic in 0 - 1.
+#' @param lin_pred Linear predictor for the probability of treatment among the
+#' remaining units. Includes intercept and fixed effects.
 #' @param alpha_re_bound The lower and upper end of the values for bi we will
 #' look at. Defaults to 10, meaning we will look between - 10 and 10.
-#' @param integral_bound The number of standard deviations of the random effect
-#' that will be used as the lower and upper limit.
-#' @param keep_re_alpha Logical. If set to TRUE the "random" effect that makes
-#' the average probability of treatment equal to alpha will be returned along
-#' with the estimated group average potential outcome.
-#' @param estimand Character, either '1' or '2.' If 1 is specified, then the
-#' estimand with numerator depending on covariates is estimated. If estimand
-#' is set equal to 2, the numerator considered is the product of Bernoulli.
-#' @param verbose Whether printing of progress is wanted. Defaults to TRUE.
-#' 
-#' @export
+#'
+FromAlphaToRE <- function(alpha, lin_pred, alpha_re_bound = 10) {
+  
+  alpha_re_bound <- abs(alpha_re_bound)
+  
+  r <- optimise(f = AlphaToBi, lower = - 1 * alpha_re_bound,
+                upper = alpha_re_bound, alpha = alpha, lin_pred = lin_pred)
+  r <- r$minimum
+  if (alpha_re_bound - abs(r) < 0.1) {
+    warning(paste0('bi = ', r, ', alpha_re_bound = ', alpha_re_bound))
+  }
+  return(r)
+}
+
+AlphaToBi <- function(b, alpha, lin_pred) {
+  exp_lin_pred <- exp(lin_pred)
+  r <- abs(mean(exp_lin_pred / (exp_lin_pred + exp(- b))) - alpha)
+  return(r)
+}
 
 CalcNumerator <- function(Ai_j, Xi_j, gamma_numer, alpha, re_alpha,
                           include_alpha = TRUE) {
+  
   gamma_numer <- matrix(gamma_numer, nrow = length(gamma_numer), ncol = 1)
   
   lin_pred <- cbind(1, as.matrix(Xi_j)) %*% gamma_numer
@@ -101,7 +125,7 @@ expit <- function(x) {
   return(exp(x) / (1 + exp(x)))
 }
 
-
+  
 Denominator <- function(A, X, phi_hat, alpha = NULL, integral_bound = 10,
                         include_alpha = TRUE) {
   
@@ -145,6 +169,39 @@ Denominator <- function(A, X, phi_hat, alpha = NULL, integral_bound = 10,
   return(ans)
 }
 
+#' Estimating the group average potential outcome
+#' 
+#' IPW estimator of the group average potential outcome.
+#'
+#' @param dta Data frame including treatment, outcome and covariates.
+#' @param cov_cols The indices including the covariates of the ps model.
+#' @param phi_hat A list with two elements. The first one is a vector of
+#' coefficients of the ps, and the second one is the random effect variance.
+#' If the second element is 0, the propensity score excludes random effects.
+#' @param gamma_numer The coefficients of the ps model in the numerator.
+#' If left NULL and estimand is 1, the coefficients in phi_hat will be used
+#' instead.
+#' @param alpha The values of alpha for which we want to estimate the group
+#' average potential outcome.
+#' @param neigh_ind List. i^{th} element is a vector with the row indices of
+#' dta that are in cluster i. Can be left NULL.
+#' @param trt_col If the treatment is not named 'A' in dta, specify the
+#' treatment column index.
+#' @param out_col If the outcome is not named 'Y', specify the outcome column
+#' index.
+#' @param alpha_re_bound The lower and upper end of the values for bi we will
+#' look at. Defaults to 10, meaning we will look between - 10 and 10.
+#' @param integral_bound The number of standard deviations of the random effect
+#' that will be used as the lower and upper limit.
+#' @param keep_re_alpha Logical. If set to TRUE the "random" effect that makes
+#' the average probability of treatment equal to alpha will be returned along
+#' with the estimated group average potential outcome.
+#' @param estimand Character, either '1' or '2.' If 1 is specified, then the
+#' estimand with numerator depending on covariates is estimated. If estimand
+#' is set equal to 2, the numerator considered is the product of Bernoulli.
+#' @param verbose Whether printing of progress is wanted. Defaults to TRUE.
+#' 
+#' @export
 GroupIPW <- function(dta, cov_cols, phi_hat, gamma_numer = NULL, alpha,
                      neigh_ind = NULL, trt_col = NULL, out_col = NULL, 
                      alpha_re_bound = 10, integral_bound = 10,
@@ -159,7 +216,7 @@ GroupIPW <- function(dta, cov_cols, phi_hat, gamma_numer = NULL, alpha,
   
   # We only return the ksi's if we are estimating estimand 1.
   keep_re_alpha <- keep_re_alpha & (estimand == '1')
-  
+
   # Specifyling neigh_ind will avoid re-running the following lines.
   if (is.null(neigh_ind)) {
     neigh_ind <- sapply(1 : max(dta$block), function(x) which(dta$block == x))
@@ -250,58 +307,27 @@ GroupIPW <- function(dta, cov_cols, phi_hat, gamma_numer = NULL, alpha,
 }
 
 
+###########################################
+### Estimates and asymptotic variance of the population average potential
+### (1)CalcScore
+### (2)Ypop
+###########################################
 
-
-# Using control data
-install.packages("Matrix")
-install.packages("lme4", type = "source")
-library(lme4)
-library(Matrix)
-
-glmer_fit_col <- lme4::glmer(
-  data = datTND[datTND$Y==0, ],
-  formula = V ~ C + (1 | block),
-  family = stats::binomial,
-  nAGQ = 2
-)
-
-
-
-phi_hat <- list(coefs = summary(glmer_fit_col)$coef[, 1],
-                re_var = as.numeric(summary(glmer_fit_col)$varcor))
-
-
-lme4::glmer(V ~ C + (1 | block), data = datTND[datTND$Y==0, ], family = 'binomial',
-            control = glmerControl(optimizer = "bobyqa",
-                                   optCtrl = list(maxfun = 2e5)))
-
-dta <- datTND
-estimand = '1'
-alpha = 0.5
-cov_cols = 'C'
-
-
-resB <- GroupIPW(dta = datTND, cov_cols = 'C', phi_hat = phi_hat, gamma_numer = NULL, alpha = c(0.2, 0.5),
-                 neigh_ind = NULL, trt_col = NULL, out_col = NULL, 
-                 alpha_re_bound = 10, integral_bound = 10,
-                 keep_re_alpha = FALSE, estimand = '1',
-                 verbose = TRUE)
-resB$yhat_group
-
-resGLMM <- GroupIPW(dta = datTND, cov_cols = 'C', phi_hat = phi_hat, gamma_numer = NULL, alpha = c(0.2, 0.5),
-                    neigh_ind = NULL, trt_col = NULL, out_col = NULL, 
-                    alpha_re_bound = 10, integral_bound = 10,
-                    keep_re_alpha = FALSE, estimand = '2',
-                    verbose = TRUE)
-head(resGLMM$yhat_group)
-
-#############################
-#####
-#####Score function
-#############################
-
-Score.est <- CalcScore(dta = datTND, neigh_ind = datTND$block, phi_hat = phi_hat, cov_cols = 'C',
-                       trt_name = NULL, integral_bound = 10)
+#' Matrix of score for the propensity score.
+#' 
+#' @param dta The data set including (at least) the treatment and covaratiates.
+#' @param neigh_ind A list including one element for each neighborhood. That
+#' element includes the indices of the observations in dta that belong to each
+#' neighborhood. Can be left NULL if dta includes a column neigh.
+#' @param phi_hat A list with two elements. The first one is a vector of
+#' coefficients of the propensity score, and the second one is the random
+#' effect variance.
+#' @param cov_cols The indeces including the covariates of the propensity score
+#' model.
+#' @param trt_name The name of the treatment column. If it is 'A', you can
+#' leave NULL.
+#' 
+#' @export
 CalcScore <- function(dta, neigh_ind = NULL, phi_hat, cov_cols,
                       trt_name = NULL, integral_bound = 10) {
   
@@ -355,9 +381,6 @@ CalcScore <- function(dta, neigh_ind = NULL, phi_hat, cov_cols,
   return(scores)  
 }
 
-
-Ypop.est <- Ypop(ygroup, ps = 'estimated', scores = Score.est,
-                 dta = NULL, use = 'everything')
 Ypop <- function(ygroup, ps = c('true', 'estimated'), scores = NULL,
                  dta = NULL, use = 'everything') {
   
@@ -431,10 +454,14 @@ Ypop <- function(ygroup, ps = c('true', 'estimated'), scores = NULL,
   
 }
 
-ygroup = resGLMM$yhat_group
-ypop <- apply(ygroup, c(2, 3), mean, na.rm = TRUE)
-ps = 'estimated'
-
+###########################################
+### Direct and spillover effect estimates and asymptotic variance
+### (1)Delta method
+### (2)DE
+### (3)IEvar
+### (4)IE
+###########################################
+  
 ###################################
 ## Delta method
 delta_method <- function(x, vec)  {
@@ -467,14 +494,7 @@ delta_method <- function(x, vec)  {
 #' 
 #' @export
 #' 
-
-ypop = Ypop.est$ypop
-ypop_var = Ypop.est$ypop_var
-
-DE(ypop = Ypop.est$ypop, ypop_var = Ypop.est$ypop_var, boots = NULL, alpha = NULL,
-   alpha_level = 0.05)
-
-
+  
 DE <- function(ypop, ypop_var, boots = NULL, alpha = NULL,
                alpha_level = 0.05) {
   
@@ -511,14 +531,13 @@ DE <- function(ypop, ypop_var, boots = NULL, alpha = NULL,
     de[8, ] <- de[1, ] - norm_quant * sqrt(de[5, ])
     de[9, ] <- de[1, ] + norm_quant * sqrt(de[5, ])
     de[10 : 11, ] <- apply(boots[2, , ] - boots[1, , ], 1, quantile,
-                           probs = quants)
+                         probs = quants)
   }
   
   return(de)
 }
 
 
-IEvar(ygroupV = ygroup[, 1 , ], scores = Score.est)
 IEvar <- function(ygroupV, scores){
   n_neigh <- dim(ygroupV)[1]
   alpha <- as.numeric(dimnames(ygroupV)[[2]])
@@ -526,7 +545,7 @@ IEvar <- function(ygroupV, scores){
   ie_var <- cov(ygroupV)
   ie_var <- ie_var * (n_neigh - 1) / (n_neigh ^ 2)
   
-  # Based on the estimated propensity score.
+# Based on the estimated propensity score.
   if (is.null(scores)) {
     stop('Provide score matrix.')
   }
@@ -584,8 +603,6 @@ IEvar <- function(ygroupV, scores){
 #' 
 #' @export
 #' 
-IE(ygroupV = ygroup[, 1 , ], scores = Score.est)
-IE(ygroupV = ygroup[, 2 , ], scores = Score.est)
 IE <- function(ygroupV, boots = NULL, scores = NULL, alpha_level = 0.05) {
   
   alpha <- as.numeric(dimnames(ygroupV)[[2]])
